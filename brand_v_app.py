@@ -1,6 +1,8 @@
 """Brand V - face contour line scanning (standalone Streamlit app).
 Run: streamlit run brand_v_app.py   (needs moire_contour.py beside it)
 """
+import base64
+
 import cv2
 import numpy as np
 import streamlit as st
@@ -9,7 +11,7 @@ import moire_contour as mc
 
 st.set_page_config(page_title="Brand V Contour Scan", layout="wide")
 st.title("Brand V - Face Contour Line Scan")
-st.caption("Front-facing photo, same distance, same lighting, head straight.")
+st.caption("Front-facing photo, same distance, same lighting, head straight.  [build 3]")
 
 
 MAX_SIDE = 1000  # phone photos are huge; shrinking keeps the server fast
@@ -28,9 +30,19 @@ def load(upload):
 
 
 def show(container, bgr, caption):
-    rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-    container.image(rgb, caption=caption, output_format="JPEG",
-                    use_container_width=True)
+    """Embed the image directly in the page (base64) so it never depends on
+    Streamlit's temporary media storage."""
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        container.error("Could not build the result image.")
+        return
+    b64 = base64.b64encode(buf.tobytes()).decode()
+    container.markdown(
+        f'<img src="data:image/jpeg;base64,{b64}" style="width:100%;border-radius:8px">'
+        f'<p style="color:gray;font-size:0.85em;margin-top:4px">{caption}</p>',
+        unsafe_allow_html=True)
+    container.download_button("Save image", buf.tobytes(), file_name="contour.jpg",
+                              mime="image/jpeg", key=f"dl_{caption}")
 
 
 def check(name, img, pts):
