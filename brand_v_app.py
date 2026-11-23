@@ -6,12 +6,13 @@ import base64
 import cv2
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 
 import moire_contour as mc
 
 st.set_page_config(page_title="Brand V Contour Scan", layout="wide")
 st.title("Brand V - Face Contour Line Scan")
-st.caption("Front-facing photo, same distance, same lighting, head straight.  [build 6]")
+st.caption("Front-facing photo, same distance, same lighting, head straight.  [build 7]")
 
 
 MAX_SIDE = 1000  # phone photos are huge; shrinking keeps the server fast
@@ -27,6 +28,32 @@ def load(upload):
     if scale < 1:
         img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     return img, mc.get_landmarks(img)
+
+
+SHARE_HTML = """
+<button id="b" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ccc;
+background:#fff;font-size:16px;font-family:sans-serif">Share / Save to Photos</button>
+<div id="m" style="font:13px sans-serif;color:#a33;margin-top:6px"></div>
+<script>
+const b64 = "__B64__";
+document.getElementById("b").onclick = async () => {
+  const m = document.getElementById("m");
+  try {
+    const bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const file = new File([arr], "contour.jpg", {type: "image/jpeg"});
+    if (navigator.canShare && navigator.canShare({files: [file]})) {
+      await navigator.share({files: [file], title: "Brand V contour"});
+    } else {
+      m.textContent = "Share not available here - press and hold the image instead.";
+    }
+  } catch (e) {
+    if (e.name !== "AbortError")
+      m.textContent = "Could not open the share sheet - press and hold the image instead.";
+  }
+};
+</script>
+"""
 
 
 def show(container, bgr, caption):
@@ -48,8 +75,10 @@ def show(container, bgr, caption):
                                   **kwargs)
     except TypeError:
         container.download_button("Save image", buf.tobytes(), **kwargs)
-    container.caption("Tip: if the button does nothing, press and hold the image "
-                      "and choose Save to Photos / Add to Photos.")
+    components.html(SHARE_HTML.replace("__B64__", b64), height=90)
+    container.caption("Save image downloads to Files > Downloads. "
+                      "Share / Save to Photos opens the iPhone share sheet. "
+                      "Or press and hold the image and choose Add to Photos.")
 
 
 def check(name, img, pts):
