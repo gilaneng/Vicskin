@@ -189,3 +189,38 @@ def quality_check(bgr):
     if abs(left - right) / max(mean, 1) > 0.15:
         issues.append("Lighting is uneven left vs right.")
     return issues
+
+
+def draw_grid(bgr, pts, rows=10, cols=8, color=(255, 255, 255), alpha=0.55,
+              extend=0.10, midline=True):
+    """Measurement grid locked to the face: runs forehead (landmark 10) to chin
+    (152) and left to right face edge (234 / 454), and follows head tilt.
+    The centre vertical line is drawn thicker as the midline. Pass the BEFORE
+    landmarks when comparing, so both contour sets are read against one fixed
+    grid."""
+    top, chin = pts[10, :2], pts[152, :2]
+    centre = (top + chin) / 2
+    axis = chin - top
+    half_h = np.linalg.norm(axis) / 2
+    ev = axis / np.linalg.norm(axis)              # down the face
+    eu = np.array([ev[1], -ev[0]])                # across the face (to the right)
+    half_w = np.linalg.norm(pts[454, :2] - pts[234, :2]) / 2
+    ew, eh = half_w * (1 + extend), half_h * (1 + extend)
+
+    layer = bgr.copy()
+    col = tuple(int(c) for c in color)
+
+    def seg(a, b, thick=1):
+        cv2.line(layer, tuple(np.int32(np.round(a))), tuple(np.int32(np.round(b))),
+                 col, thick, cv2.LINE_AA)
+
+    for k in range(rows + 1):                     # horizontal lines
+        t = -half_h + 2 * half_h * k / rows
+        seg(centre + eu * -ew + ev * t, centre + eu * ew + ev * t)
+    for k in range(cols + 1):                     # vertical lines
+        s = -half_w + 2 * half_w * k / cols
+        thick = 2 if (midline and cols % 2 == 0 and k == cols // 2) else 1
+        seg(centre + eu * s + ev * -eh, centre + eu * s + ev * eh, thick)
+    if midline and cols % 2 == 1:                 # odd: add an explicit midline
+        seg(centre + ev * -eh, centre + ev * eh, 2)
+    return cv2.addWeighted(layer, alpha, bgr, 1 - alpha, 0)
