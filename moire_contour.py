@@ -224,3 +224,34 @@ def draw_grid(bgr, pts, rows=10, cols=8, color=(255, 255, 255), alpha=0.55,
     if midline and cols % 2 == 1:                 # odd: add an explicit midline
         seg(centre + ev * -eh, centre + ev * eh, 2)
     return cv2.addWeighted(layer, alpha, bgr, 1 - alpha, 0)
+
+
+def side_by_side(before_bgr, before_pts, after_bgr, after_pts, lines_across_face=24):
+    """Before and after photos for a side-by-side view. The after photo is
+    aligned into the before photo's frame (same anchors as compare_contours),
+    so features line up across the two panels and one grid fits both.
+    Before gets RED contour lines, after gets GREEN, drawn with the same
+    absolute depth step so a real change shifts the lines. Returns (left, right)."""
+    h, w = before_bgr.shape[:2]
+    m, scale = similarity_align(after_pts[ANCHORS], before_pts[ANCHORS])
+    after_al = cv2.warpAffine(after_bgr, m, (w, h), flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REPLICATE)
+    xy = (after_pts[:, :2] @ m[:, :2].T) + m[:, 2]
+    a_pts = np.column_stack([xy, after_pts[:, 2] * scale])
+    b_pts = before_pts.copy()
+    ref = 168
+    b_pts[:, 2] -= b_pts[ref, 2]
+    a_pts[:, 2] -= a_pts[ref, 2]
+
+    d_b, _ = depth_map(b_pts, before_bgr.shape)
+    d_a, _ = depth_map(a_pts, before_bgr.shape)
+    step = max((np.nanmax(d_b) - np.nanmin(d_b)) / lines_across_face, 1e-6)
+
+    def paint(img, lines, col):
+        a = (lines * 0.9)[..., None]
+        out = img.astype(np.float32) * (1 - a) + np.array(col, np.float32) * a
+        return out.astype(np.uint8)
+
+    left = paint(before_bgr, fringe_lines(d_b, step), (0, 0, 255))
+    right = paint(after_al, fringe_lines(d_a, step), (0, 255, 0))
+    return left, right

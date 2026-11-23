@@ -122,6 +122,17 @@ def check(name, img, pts):
     return True
 
 
+def labelled_pair(left, right):
+    """Join two equal-size images with a divider and BEFORE / AFTER labels."""
+    h = left.shape[0]
+    out = np.hstack([left, np.full((h, 8, 3), 255, np.uint8), right])
+    for text, x in (("BEFORE", 14), ("AFTER", left.shape[1] + 22)):
+        for col, th in (((60, 40, 74), 5), ((255, 255, 255), 2)):
+            cv2.putText(out, text, (x, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.9, col, th,
+                        cv2.LINE_AA)
+    return out
+
+
 def jpg(bgr):
     ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return buf.tobytes() if ok else None
@@ -190,8 +201,14 @@ with tab_cmp:
     if b_img is None or a_img is None:
         guide("Upload both photos, taken the same way. " + TIPS)
     elif check("Before", b_img, b_pts) and check("After", a_img, a_pts):
+        left, right = mc.side_by_side(b_img, b_pts, a_img, a_pts, lines_n)
+        pair = labelled_pair(with_grid(left, b_pts), with_grid(right, b_pts))
+        res = card(pair, "Before and after, side by side",
+                   legend=[("#E53935", "Before lines"), ("#43A047", "After lines")])
+        if res:
+            save_controls(*res, key="cmp_side")
         comp, rep = mc.compare_contours(b_img, b_pts, a_img, a_pts, lines_n)
-        res = card(with_grid(comp, b_pts), "Contour comparison",
+        res = card(with_grid(comp, b_pts), "Contour change: red = before, green = after",
                    legend=[("#E53935", "Before"), ("#43A047", "After")])
         metric_row([("Jaw lift (% face height)", f"{rep['jaw_lift_pct_face_height']:.1f}%"),
                     ("Mean depth change", f"{rep['mean_abs_depth_change_pct']:.1f}%")])
