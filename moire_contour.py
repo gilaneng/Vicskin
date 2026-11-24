@@ -20,6 +20,9 @@ FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397,
 # stable anchor points used for alignment (outer eye corners, nose bridge, chin)
 ANCHORS = [33, 263, 133, 362, 168, 1, 152, 10]
 LEFT_EYE_OUTER, RIGHT_EYE_OUTER = 33, 263
+RED_BGR = (0, 0, 255)
+GREEN_BGR = (0, 200, 0)   # deeper, more vivid green than pure lime
+GREEN_THICK = 1.8         # green (after) lines drawn heavier so they stay visible
 
 
 def get_landmarks(bgr):
@@ -134,11 +137,11 @@ def compare_contours(before_bgr, before_pts, after_bgr, after_pts,
     span = np.nanmax(d_b) - np.nanmin(d_b)
     step = max(span / lines_across_face, 1e-6)
     l_b = fringe_lines(d_b, step)
-    l_a = fringe_lines(d_a, step)
+    l_a = fringe_lines(d_a, step, GREEN_THICK)
 
     comp = before_bgr.astype(np.float32) * 0.75
-    for lines, col in ((l_b, (0, 0, 255)), (l_a, (0, 255, 0))):
-        a = (lines * 0.9)[..., None]
+    for lines, col, alpha in ((l_b, RED_BGR, 0.9), (l_a, GREEN_BGR, 1.0)):
+        a = (lines * alpha)[..., None]
         comp = comp * (1 - a) + np.array(col, np.float32) * a
     comp = comp.astype(np.uint8)
 
@@ -169,8 +172,9 @@ def symmetry_map(bgr, pts, lines_across_face=24):
     m = np.float32([[-1, 0, 2 * mid_x], [0, 1, 0]])
     mirrored = cv2.warpAffine(lines, m, (w, h))
     comp = bgr.astype(np.float32) * 0.75
-    for ln, col in ((lines, (0, 0, 255)), (mirrored, (0, 255, 0))):
-        a = (ln * 0.9)[..., None]
+    mirrored = np.clip(mirrored * GREEN_THICK, 0, 1)
+    for ln, col, alpha in ((lines, RED_BGR, 0.9), (mirrored, GREEN_BGR, 1.0)):
+        a = (ln * alpha)[..., None]
         comp = comp * (1 - a) + np.array(col, np.float32) * a
     return comp.astype(np.uint8)
 
@@ -191,20 +195,30 @@ def quality_check(bgr):
     return issues
 
 
+def _grid_frame(pts, dx=0.0, dy=0.0, scale=1.0, rot_deg=0.0):
+    """Grid centre, axes and half sizes. dx, dy are fractions of face width /
+    height; scale multiplies the size; rot_deg tilts the grid."""
+    top, chin = pts[10, :2], pts[152, :2]
+    axis = chin - top
+    half_h = np.linalg.norm(axis) / 2
+    ev = axis / np.linalg.norm(axis)
+    r = np.radians(rot_deg)
+    ev = np.array([ev[0] * np.cos(r) - ev[1] * np.sin(r),
+                   ev[0] * np.sin(r) + ev[1] * np.cos(r)])
+    eu = np.array([ev[1], -ev[0]])
+    half_w = np.linalg.norm(pts[454, :2] - pts[234, :2]) / 2
+    centre = (top + chin) / 2 + eu * (dx * 2 * half_w) + ev * (dy * 2 * half_h)
+    return centre, ev, eu, half_w * scale, half_h * scale
+
+
 def draw_grid(bgr, pts, rows=10, cols=8, color=(255, 255, 255), alpha=0.55,
-              extend=0.10, midline=True):
+              extend=0.10, midline=True, dx=0.0, dy=0.0, scale=1.0, rot_deg=0.0):
     """Measurement grid locked to the face: runs forehead (landmark 10) to chin
     (152) and left to right face edge (234 / 454), and follows head tilt.
     The centre vertical line is drawn thicker as the midline. Pass the BEFORE
     landmarks when comparing, so both contour sets are read against one fixed
     grid."""
-    top, chin = pts[10, :2], pts[152, :2]
-    centre = (top + chin) / 2
-    axis = chin - top
-    half_h = np.linalg.norm(axis) / 2
-    ev = axis / np.linalg.norm(axis)              # down the face
-    eu = np.array([ev[1], -ev[0]])                # across the face (to the right)
-    half_w = np.linalg.norm(pts[454, :2] - pts[234, :2]) / 2
+    centre, ev, eu, half_w, half_h = _grid_frame(pts, dx, dy, scale, rot_deg)
     ew, eh = half_w * (1 + extend), half_h * (1 + extend)
 
     layer = bgr.copy()
@@ -247,11 +261,19 @@ def side_by_side(before_bgr, before_pts, after_bgr, after_pts, lines_across_face
     d_a, _ = depth_map(a_pts, before_bgr.shape)
     step = max((np.nanmax(d_b) - np.nanmin(d_b)) / lines_across_face, 1e-6)
 
-    def paint(img, lines, col):
-        a = (lines * 0.9)[..., None]
+    def paint(img, lines, col, alpha=0.9):
+        a = (lines * alpha)[..., None]
         out = img.astype(np.float32) * (1 - a) + np.array(col, np.float32) * a
         return out.astype(np.uint8)
 
-    left = paint(before_bgr, fringe_lines(d_b, step), (0, 0, 255))
-    right = paint(after_al, fringe_lines(d_a, step), (0, 255, 0))
+    left = paint(before_bgr, fringe_lines(d_b, step), RED_BGR)
+    right = paint(after_al, fringe_lines(d_a, step, GREEN_THICK), GREEN_BGR, 1.0)
     return left, right
+
+
+def grid_geometry(pts, dx=0.0, dy=0.0, scale=1.0, rot_deg=0.0):
+    """Starting position of the face grid as numbers, so the browser can draw it
+    and let the user drag, resize and rotate it."""
+    centre, ev, eu, half_w, half_h = _grid_frame(pts, dx, dy, scale, rot_deg)
+    return {"cx": float(centre[0]), "cy": float(centre[1]), "hw": float(half_w),
+            "hh": float(half_h), "a": float(np.arctan2(eu[1], eu[0]))}
